@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+gecici_*.jpg
+temp_*
+.pytest_cache/
+
+# Egitim veri seti fotograflari GitHub'a gitmiyor (buyuk + kisisel veri
+# icerebilir); orijinal kaynak KAYNAKLAR/EK bolumundeki Kaggle linkinde.
+# data.yaml, classes.txt gibi kucuk ayar dosyalari yine de depoda kalir.
+ml/dataset/images/
+ml/dataset/labels/
