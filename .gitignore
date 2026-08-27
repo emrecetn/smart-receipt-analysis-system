@@ -5,8 +5,9 @@ gecici_*.jpg
 temp_*
 .pytest_cache/
 
-# Egitim veri seti fotograflari GitHub'a gitmiyor (buyuk + kisisel veri
-# icerebilir); orijinal kaynak KAYNAKLAR/EK bolumundeki Kaggle linkinde.
-# data.yaml, classes.txt gibi kucuk ayar dosyalari yine de depoda kalir.
+# Training dataset photos are not pushed to GitHub (large + may contain
+# personal data); the original source is the Kaggle link in the report's
+# SOURCES/APPENDIX section. Small config files like data.yaml and
+# classes.txt still stay in the repo.
 ml/dataset/images/
 ml/dataset/labels/

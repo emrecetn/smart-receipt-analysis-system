@@ -32,9 +32,9 @@ def test_hash_api_key_is_deterministic_sha256():
 
 
 def test_live_key_lookup_queries_by_hash_not_raw_value(client, sample_image_bytes):
-    """Regresyon kilidi: dogrulama duz metin api_key ile degil, hash ile
-    yapilmali. Eskiden duz metinle karsilastiriliyordu - bu, veritabaninda
-    hicbir zaman ham anahtarin aranmadigini garanti eder."""
+    """Regression lock: validation must be done by hash, not the raw
+    api_key. It used to compare against the raw text — this guarantees
+    the raw key is never looked up in the database."""
     fake_supabase = MagicMock()
     fake_supabase.from_.return_value.select.return_value.eq.return_value.execute.return_value.data = []
     raw_key = "sk_live_regresyon_testi"
@@ -172,8 +172,9 @@ def test_malformed_json_from_model_returns_502(client, demo_headers, sample_imag
 
 
 def test_schema_mismatch_from_model_returns_502(client, demo_headers, sample_image_bytes):
-    """Model syntactically gecerli JSON donse bile semaya uymuyorsa 502 olmali,
-    FastAPI'nin otomatik response_model dogrulamasina birakilip 500'e dusmemeli."""
+    """Even if the model returns syntactically valid JSON, a schema mismatch
+    must result in a 502, not be left to FastAPI's automatic response_model
+    validation and fall through as a 500."""
     payload = {"tax_breakdown": [{"rate": "yirmi", "amount": "cok"}]}
     with patch.object(main, "yolo_model", side_effect=lambda *a, **k: fake_yolo_result(detected=False)), \
          patch.object(main.client.chat.completions, "create", return_value=fake_openai_response(payload)):

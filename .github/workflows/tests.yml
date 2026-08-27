@@ -1,6 +1,6 @@
-name: Testler
+name: Tests
 
-# Ne zaman calisir: master'a her push'ta ve master'a acilan her pull request'te
+# When it runs: on every push to master, and on every pull request into master
 on:
   push:
     branches: [ master ]
@@ -11,18 +11,18 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Kodu indir
+      - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Python kurulumu
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Bağımlılıkları kur
+      - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Testleri çalıştır
+      - name: Run tests
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

@@ -5,7 +5,7 @@ import main
 
 
 def test_receipt_data_allows_all_null_fields():
-    """Prompt, emin olunamayan alanlar icin null doner - şema bunu kabul etmeli."""
+    """The prompt returns null for fields it isn't sure about - the schema must accept that."""
     data = main.ReceiptData()
     assert data.merchant_name is None
     assert data.total_amount is None
@@ -13,7 +13,7 @@ def test_receipt_data_allows_all_null_fields():
 
 
 def test_receipt_data_coerces_numeric_strings_to_float():
-    """GPT bazen sayiyi string olarak donebilir; Pydantic v2 lax modda coerce eder."""
+    """GPT sometimes returns numbers as strings; Pydantic v2 coerces them in lax mode."""
     data = main.ReceiptData(total_amount="125.50", tax_amount="18")
     assert data.total_amount == 125.50
     assert data.tax_amount == 18.0
@@ -41,4 +41,4 @@ def test_tax_breakdown_item_rejects_non_numeric_rate():
 
 def test_extract_receipt_response_requires_all_top_level_fields():
     with pytest.raises(ValidationError):
-        main.ExtractReceiptResponse(status="success")  # durations, data vb. eksik
+        main.ExtractReceiptResponse(status="success")  # durations, data, etc. missing

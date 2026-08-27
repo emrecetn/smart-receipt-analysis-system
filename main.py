@@ -20,33 +20,33 @@ import base64
 
 load_dotenv()
 
-# iPhone'ların varsayılan fotoğraf formatı HEIC; Pillow bunu bu opener kayıtlı
-# olmadan açamaz. cv2.imdecode HEIC'i hiç desteklemiyor.
+# iPhone's default photo format is HEIC; Pillow can't open it without this
+# opener registered. cv2.imdecode doesn't support HEIC at all.
 pillow_heif.register_heif_opener()
 
 MAX_FILE_SIZE_MB = 15
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
-app = FastAPI(title="Akıllı Fiş Analiz Sistemi | API & Dev Portal", version="5.1")
+app = FastAPI(title="Smart Receipt Analysis System | API & Dev Portal", version="5.1")
 
-# --- 1. SUPABASE ADMIN BAĞLANTISI ---
+# --- 1. SUPABASE ADMIN CONNECTION ---
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-# service_role key .env dosyasından okunur (RLS'i bypass ettiği için asla koda gömülmez)
+# service_role key is read from .env (never hardcoded, since it bypasses RLS)
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
 supabase: Optional[Client] = None
 try:
-    # Service role kullanarak RLS engellerini aşıyoruz
+    # Using the service role to bypass RLS restrictions
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-    print("[SİSTEM] Supabase Admin Bağlantısı Başarılı.")
+    print("[SYSTEM] Supabase Admin Connection Successful.")
 except Exception as e:
-    print(f"[HATA] Supabase bağlantısı kurulamadı: {e}")
+    print(f"[ERROR] Could not establish Supabase connection: {e}")
 
-# --- 2. CORS AYARLARI ---
-# Bu API üçüncü parti (B2B) müşterilerin kendi domainlerinden çağırması için
-# tasarlandı, bu yüzden allow_origins=["*"] kasıtlı. allow_credentials=False:
-# kimlik doğrulama cookie değil X-API-Key header'ı ile yapılıyor, ayrıca
-# tarayıcılar "*" origin ile credentials=true kombinasyonunu zaten reddeder.
+# --- 2. CORS SETTINGS ---
+# This API is designed to be called by third-party (B2B) customers from
+# their own domains, so allow_origins=["*"] is intentional. allow_credentials=False
+# because auth is done via the X-API-Key header, not cookies — and browsers
+# reject the "*" origin + credentials=true combination anyway.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -56,37 +56,37 @@ app.add_middleware(
 )
 
 def hash_api_key(raw_key: str) -> str:
-    """API anahtarlarını veritabanına yazmadan önce hash'lemek için kullanılır.
-    Frontend tarafında da (Web Crypto SubtleCrypto ile) aynı SHA-256 algoritması
-    uygulanıyor; böylece veritabanında hiçbir zaman ham anahtar tutulmaz."""
+    """Used to hash API keys before writing them to the database.
+    The frontend applies the same SHA-256 algorithm (via Web Crypto
+    SubtleCrypto), so the raw key is never stored in the database."""
     return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
-# --- 3. GÜVENLİK KAPISI (Dinamik API Key Kontrolü) ---
+# --- 3. SECURITY GATE (Dynamic API Key Check) ---
 async def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
-    """Hem sabit test anahtarını hem de Supabase'deki canlı anahtarları doğrular."""
+    """Validates both the fixed demo key and live keys stored in Supabase."""
 
-    # Durum A: Sabit Test Anahtarı
+    # Case A: Fixed demo key
     if x_api_key == "sk_test_demo123456789":
         return "Demo Müşteri"
 
-    # Durum B: Canlı Geliştirici Anahtarı (sk_live_...)
+    # Case B: Live developer key (sk_live_...)
     if x_api_key.startswith("sk_live_"):
         if supabase is None:
             raise HTTPException(status_code=503, detail="Kimlik doğrulama servisi şu anda kullanılamıyor.")
         try:
-            # Veritabanında ham anahtar değil, hash'i saklanıyor; aynı şekilde sorgula
+            # Only the hash is stored in the database, not the raw key; query the same way
             key_hash = hash_api_key(x_api_key)
             response = supabase.from_("api_keys").select("company_name").eq("api_key_hash", key_hash).execute()
 
             if response.data and len(response.data) > 0:
-                # Anahtar bulundu, şirket adını döndür
+                # Key found, return the company name
                 return response.data[0]["company_name"]
         except Exception as e:
-            print(f"[HATA] API Key sorgulanırken hata oluştu: {e}")
+            print(f"[ERROR] Error occurred while querying API Key: {e}")
             raise HTTPException(status_code=500, detail="Doğrulama servisi hatası.")
 
-    # Durum C: Geçersiz Anahtar
+    # Case C: Invalid key
     raise HTTPException(status_code=403, detail="Geçersiz API Anahtarı! Lütfen Geliştirici Panelinden kontrol edin.")
 
 SYSTEM_PROMPT = """Sen uzman bir finansal veri çıkarma asistanısın.
@@ -154,9 +154,9 @@ class HealthResponse(BaseModel):
 
 
 def decode_image(content: bytes):
-    """Yüklenen dosyayı BGR numpy dizisine çevirir. Önce hızlı yol olan OpenCV'yi
-    dener; JPEG/PNG/WEBP dışındaki formatlarda (örn. HEIC) None dönerse Pillow'a
-    düşer. İkisi de başarısız olursa None döner (bozuk/desteklenmeyen dosya)."""
+    """Converts the uploaded file into a BGR numpy array. Tries the fast path
+    (OpenCV) first; falls back to Pillow if it returns None for formats other
+    than JPEG/PNG/WEBP (e.g. HEIC). Returns None if both fail (corrupt/unsupported file)."""
     if not content:
         return None
 
@@ -174,22 +174,22 @@ def decode_image(content: bytes):
         return None
 
 
-# --- 4. MODELLERİ YÜKLEME ---
-print("[BAŞLATICI] YOLO Yükleniyor...")
+# --- 4. LOADING MODELS ---
+print("[STARTUP] Loading YOLO...")
 yolo_model = YOLO('ml/runs/detect/fis_tespit_modeli/weights/best.pt')
 
-# OpenAI Bağlantısı
+# OpenAI connection
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-print("[BAŞLATICI] OpenAI Vision Modülü Hazır.")
+print("[STARTUP] OpenAI Vision Module Ready.")
 
-# --- 5. ENDPOINTLER ---
+# --- 5. ENDPOINTS ---
 
 @app.get("/", include_in_schema=False)
 async def root():
     return FileResponse("index.html")
 
 
-@app.get("/health", response_model=HealthResponse, tags=["Sistem"], summary="Servis sağlık kontrolü")
+@app.get("/health", response_model=HealthResponse, tags=["System"], summary="Service health check")
 async def health_check():
     return HealthResponse(
         status="ok",
@@ -201,17 +201,17 @@ async def health_check():
 @app.post(
     "/api/v1/extract-receipt",
     response_model=ExtractReceiptResponse,
-    tags=["Fiş Analizi"],
-    summary="Fiş/fatura görselinden finansal veri çıkar",
+    tags=["Receipt Analysis"],
+    summary="Extract financial data from a receipt/invoice image",
 )
 async def extract_receipt(
     file: UploadFile = File(...),
     company_name: str = Depends(verify_api_key)
 ):
-    print(f"\n[{file.filename}] >>> İSTEK GELDİ | Firma: {company_name}")
+    print(f"\n[{file.filename}] >>> REQUEST RECEIVED | Company: {company_name}")
     start_time_total = time.time()
 
-    # AŞAMA 0: DOSYA DOĞRULAMA (boyut + okunabilirlik)
+    # STAGE 0: FILE VALIDATION (size + readability)
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Boş dosya yüklendi.")
@@ -225,15 +225,15 @@ async def extract_receipt(
             detail="Görüntü okunamadı veya bozuk. Desteklenen formatlar: JPEG, PNG, WEBP, HEIC."
         )
 
-    # AŞAMA 1: YOLO İLE FİŞİ ARKA PLANDAN İZOLE ET
+    # STAGE 1: ISOLATE THE RECEIPT FROM THE BACKGROUND WITH YOLO
     try:
         yolo_start = time.time()
         yolo_sonuclar = yolo_model(img, verbose=False)
     except Exception as e:
-        print(f"[HATA] YOLO tespiti başarısız: {e}")
+        print(f"[ERROR] YOLO detection failed: {e}")
         raise HTTPException(status_code=500, detail="Fiş tespiti sırasında bir hata oluştu.")
 
-    # YOLO tespit ederse ve kutu geçerliyse kırp; aksi halde orijinal görselle devam et
+    # Crop if YOLO detected something and the box is valid; otherwise continue with the original image
     yolo_detected = False
     if len(yolo_sonuclar) > 0 and len(yolo_sonuclar[0].boxes) > 0:
         kutu = yolo_sonuclar[0].boxes[0]
@@ -244,7 +244,7 @@ async def extract_receipt(
 
     yolo_sure = round(time.time() - yolo_start, 2)
 
-    # Optimizasyon: Boyutlandırma
+    # Optimization: resizing
     max_boyut = 1500
     h, w = img.shape[:2]
     if max(h, w) > max_boyut:
@@ -256,7 +256,7 @@ async def extract_receipt(
         raise HTTPException(status_code=500, detail="Görüntü işlenirken bir hata oluştu.")
     base64_image = base64.b64encode(buffer).decode('utf-8')
 
-    # AŞAMA 2: OPENAI VISION ANALİZİ
+    # STAGE 2: OPENAI VISION ANALYSIS
     ai_start = time.time()
     try:
         response = client.chat.completions.create(
@@ -274,14 +274,14 @@ async def extract_receipt(
             response_format={ "type": "json_object" }
         )
     except OpenAIError as e:
-        print(f"[HATA] OpenAI isteği başarısız: {e}")
+        print(f"[ERROR] OpenAI request failed: {e}")
         raise HTTPException(status_code=502, detail="Yapay zeka servisine şu anda ulaşılamıyor. Lütfen tekrar deneyin.")
 
     try:
         json_verisi = json.loads(response.choices[0].message.content)
         receipt_data = ReceiptData(**json_verisi)
     except (json.JSONDecodeError, ValidationError, IndexError, AttributeError, TypeError) as e:
-        print(f"[HATA] Model çıktısı ayrıştırılamadı/doğrulanamadı: {e}")
+        print(f"[ERROR] Could not parse/validate model output: {e}")
         raise HTTPException(status_code=502, detail="Yapay zeka modeli geçersiz formatta yanıt döndürdü.")
 
     ai_sure = round(time.time() - ai_start, 2)
